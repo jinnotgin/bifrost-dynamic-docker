@@ -1,0 +1,85 @@
+# syntax=docker/dockerfile:1
+
+ARG BIFROST_VERSION=1.4.24
+ARG BIFROST_TAG=transports/v${BIFROST_VERSION}
+
+FROM node:25-alpine3.23 AS ui-builder
+
+ARG BIFROST_TAG
+
+WORKDIR /src
+
+RUN apk add --no-cache git
+
+RUN git clone --depth 1 --branch "${BIFROST_TAG}" https://github.com/maximhq/bifrost.git .
+
+WORKDIR /src/ui
+
+RUN npm ci
+RUN npm run build-enterprise
+
+
+FROM golang:1.26.1-alpine3.23 AS builder
+
+ARG BIFROST_VERSION
+ARG BIFROST_TAG
+
+WORKDIR /src
+
+RUN apk add --no-cache git gcc musl-dev sqlite-dev
+
+RUN git clone --depth 1 --branch "${BIFROST_TAG}" https://github.com/maximhq/bifrost.git .
+
+ENV CGO_ENABLED=1 \
+    GOOS=linux \
+    GOWORK=off
+
+WORKDIR /src/transports
+
+RUN go mod download
+
+COPY --from=ui-builder /src/ui/out ./bifrost-http/ui
+
+RUN go build \
+    -ldflags="-w -s -X main.Version=v${BIFROST_VERSION}" \
+    -a -trimpath \
+    -o /app/main \
+    ./bifrost-http
+
+RUN ldd /app/main
+
+
+FROM alpine:3.23
+
+ARG BIFROST_VERSION
+
+WORKDIR /app
+
+RUN apk add --no-cache musl libgcc ca-certificates wget
+
+ENV APP_PORT=8080 \
+    APP_HOST=0.0.0.0 \
+    LOG_LEVEL=info \
+    LOG_STYLE=json \
+    APP_DIR=/app/data
+
+LABEL org.opencontainers.image.title="Bifrost Dynamic Alpine"
+LABEL org.opencontainers.image.description="Dynamic/plugin-capable Bifrost Docker image"
+LABEL org.opencontainers.image.version="${BIFROST_VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/maximhq/bifrost"
+
+COPY --from=builder /app/main /app/main
+
+RUN mkdir -p /app/data/plugins /app/data/logs && \
+    adduser -D -s /bin/sh appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+VOLUME ["/app/data"]
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${APP_PORT}/metrics || exit 1
+
+CMD ["/app/main"]
