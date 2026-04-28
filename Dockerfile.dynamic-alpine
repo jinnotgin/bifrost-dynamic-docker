@@ -26,7 +26,7 @@ ARG BIFROST_TAG
 
 WORKDIR /src
 
-RUN apk add --no-cache git gcc musl-dev sqlite-dev
+RUN apk add --no-cache git build-base binutils binutils-gold sqlite-dev
 
 RUN git clone --depth 1 --branch "${BIFROST_TAG}" https://github.com/maximhq/bifrost.git .
 
@@ -41,7 +41,7 @@ RUN go mod download
 COPY --from=ui-builder /src/ui/out ./bifrost-http/ui
 
 RUN go build \
-    -ldflags="-w -s -X main.Version=v${BIFROST_VERSION}" \
+    -ldflags="-w -s -X main.Version=v${BIFROST_VERSION} -extldflags=-fuse-ld=bfd" \
     -a -trimpath \
     -o /app/main \
     ./bifrost-http
