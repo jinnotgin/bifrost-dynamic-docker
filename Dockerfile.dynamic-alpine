@@ -2,6 +2,7 @@
 
 ARG BIFROST_VERSION=1.4.24
 ARG BIFROST_TAG=transports/v${BIFROST_VERSION}
+ARG GO_BUILDER_IMAGE=golang:1.26.2-alpine3.23
 
 # ----------------------------
 # Build Bifrost UI
@@ -25,7 +26,7 @@ RUN npm run build-enterprise
 # ----------------------------
 # Build Bifrost HTTP binary
 # ----------------------------
-FROM golang:1.26.2-alpine3.23 AS builder
+FROM ${GO_BUILDER_IMAGE} AS builder
 
 ARG BIFROST_VERSION
 ARG BIFROST_TAG
