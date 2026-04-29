@@ -3,6 +3,9 @@
 ARG BIFROST_VERSION=1.4.24
 ARG BIFROST_TAG=transports/v${BIFROST_VERSION}
 
+# ----------------------------
+# Build Bifrost UI
+# ----------------------------
 FROM node:25-alpine3.23 AS ui-builder
 
 ARG BIFROST_TAG
@@ -19,6 +22,9 @@ RUN npm ci
 RUN npm run build-enterprise
 
 
+# ----------------------------
+# Build Bifrost HTTP binary
+# ----------------------------
 FROM golang:1.26.2-alpine3.23 AS builder
 
 ARG BIFROST_VERSION
@@ -26,7 +32,12 @@ ARG BIFROST_TAG
 
 WORKDIR /src
 
-RUN apk add --no-cache git build-base binutils binutils-gold sqlite-dev
+RUN apk add --no-cache \
+    git \
+    build-base \
+    binutils \
+    binutils-gold \
+    sqlite-dev
 
 RUN git clone --depth 1 --branch "${BIFROST_TAG}" https://github.com/maximhq/bifrost.git .
 
@@ -38,30 +49,39 @@ WORKDIR /src/transports
 
 RUN go mod download
 
+# Replace the embedded UI with the built enterprise UI.
 COPY --from=ui-builder /src/ui/out ./bifrost-http/ui
 
 RUN go build \
     -ldflags="-w -s -X main.Version=v${BIFROST_VERSION} -extldflags=-fuse-ld=bfd" \
-    -a -trimpath \
+    -a \
+    -trimpath \
     -o /app/main \
     ./bifrost-http
 
 RUN ldd /app/main
 
 
+# ----------------------------
+# Runtime image
+# ----------------------------
 FROM alpine:3.23
 
 ARG BIFROST_VERSION
 
 WORKDIR /app
 
-RUN apk add --no-cache musl libgcc ca-certificates wget
+RUN apk add --no-cache \
+    musl \
+    libgcc \
+    ca-certificates \
+    wget
 
-ENV APP_PORT=8080 \
-    APP_HOST=0.0.0.0 \
+ENV APP_HOST=0.0.0.0 \
+    APP_PORT=8080 \
+    APP_DIR=/app/data \
     LOG_LEVEL=info \
-    LOG_STYLE=json \
-    APP_DIR=/app/data
+    LOG_STYLE=json
 
 LABEL org.opencontainers.image.title="Bifrost Dynamic Alpine"
 LABEL org.opencontainers.image.description="Dynamic/plugin-capable Bifrost Docker image"
@@ -69,17 +89,21 @@ LABEL org.opencontainers.image.version="${BIFROST_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/maximhq/bifrost"
 
 COPY --from=builder /app/main /app/main
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-RUN mkdir -p /app/data/plugins /app/data/logs && \
+RUN chmod +x /app/main /usr/local/bin/docker-entrypoint.sh && \
+    mkdir -p /app/data/plugins /app/data/logs && \
     adduser -D -s /bin/sh appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app /usr/local/bin/docker-entrypoint.sh
 
 USER appuser
 
 VOLUME ["/app/data"]
+
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 -O /dev/null http://127.0.0.1:${APP_PORT}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 -O /dev/null "http://127.0.0.1:${APP_PORT}/health" || exit 1
 
-CMD ["/app/main"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD []
