@@ -51,9 +51,15 @@ linux/arm64
 
 Single-architecture builds are usually faster and use less registry storage, but they are less portable.
 
-## Go version patching
+## Go builder image
 
 Bifrost’s required Go version may change between upstream releases. For example, Bifrost `v1.4.24` requires Go `1.26.2` or newer.
+
+The Dockerfile uses a single build argument for the Go builder image:
+
+```dockerfile
+ARG GO_BUILDER_IMAGE=golang:1.26.2-alpine3.23
+```
 
 If the Docker build fails with an error like:
 
@@ -61,15 +67,15 @@ If the Docker build fails with an error like:
 go.mod requires go >= 1.26.2
 ```
 
-then update the Go builder image in `Dockerfile.dynamic-alpine`.
+then update the `go_builder_image` workflow input when running the GitHub Actions workflow.
 
 Example:
 
-```dockerfile
-FROM golang:1.26.2-alpine3.23 AS builder
+```text
+golang:1.26.2-alpine3.23
 ```
 
-The Go version used to build Bifrost should also be used to build any dynamic plugins. For example:
+The same Go builder image should also be used to build any dynamic plugins. For example:
 
 ```bash
 docker run --rm \
@@ -80,6 +86,25 @@ docker run --rm \
          CGO_ENABLED=1 go build -buildmode=plugin -o myplugin.so main.go"
 ```
 
-Keeping the Go version aligned helps avoid plugin loading issues caused by mismatched build environments.
+Keeping the Go version, Alpine version, libc, CPU architecture, and CGO dependencies aligned helps avoid plugin loading issues caused by mismatched build environments.
 
+## Local build
+
+To build locally with the default Go builder image:
+
+```bash
+docker build \
+  -f Dockerfile.dynamic-alpine \
+  --build-arg BIFROST_VERSION=1.4.24 \
+  -t bifrost-dynamic-alpine:v1.4.24 .
+```
+
+To override the Go builder image:
+
+```bash
+docker build \
+  -f Dockerfile.dynamic-alpine \
+  --build-arg BIFROST_VERSION=1.4.24 \
+  --build-arg GO_BUILDER_IMAGE=golang:1.26.2-alpine3.23 \
+  -t bifrost-dynamic-alpine:v1.4.24 .
 ```
